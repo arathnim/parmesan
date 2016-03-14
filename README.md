@@ -48,7 +48,7 @@ Parmesan requires quicklisp to run. It's been tested on sbcl, but should work on
 to install quicklisp, head over to [quicklisp's website](https://www.quicklisp.org/beta/) and follow the instructions there.
 Make sure you run `(ql:add-to-init-file)`, otherwise quicklisp won't be avaliable when you start your interpreter.
 
-To use parmesan, just `load parmesan.cl` in your interpreter, `use` the package, and the macros will be avaliable.
+To use parmesan, just cd into the project directory, run `(ql:quickload 'parmesan)`, and the macros will be avaliable.
 
 ## Thanks
 
