@@ -52,4 +52,4 @@ To use parmesan, just `load parmesan.cl` in your interpreter, `use` the package,
 
 ## Thanks
 
-Thanks to kori, who came up with the fun name for this project.
+Thanks to [kori](https://github.com/kori), who came up with the fun name for this project.
