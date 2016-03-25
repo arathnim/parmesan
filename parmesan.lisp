@@ -7,7 +7,7 @@
       :parse :pretty-error :call-with-context :return-with-context
       :defparser :seq :choice :one-of :none-of :many :sep-many :many+ :sep-many+
       :sep-num :num :par :ret :str :skip :consume-byte :restr :option :between :any-char
-      :sym :letter :digit :hex-digit :whitespace :sep))
+      :sym :letter :digit :hex-digit :octal-digit :whitespace :sep))
 (in-package parmesan)
 
 (defvar parse-stack nil) ;; (str)
@@ -297,5 +297,6 @@
 (defparser sym (one-of "~!@#$%^&*-_=+<>,./\\"))
 (defparser letter (one-of "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"))
 (defparser digit (one-of "0123456789"))
-(defparser hex-digit (one-of "0123456789abcdef"))
+(defparser hex-digit (one-of "0123456789abcdefABCDEF"))
+(defparser octal-digit (one-of "01234567"))
 (defparser whitespace (one-of (coerce '(#\Space #\Tab #\Newline) 'string)))
