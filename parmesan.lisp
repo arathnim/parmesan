@@ -1,13 +1,15 @@
 ;; author *this* => ("Dylan Ball" "Arathnim@gmail.com")
+
 (proclaim '(optimize (speed 0) (safety 3) (debug 3) (space 0)))
 (declaim #+sbcl(sb-ext:muffle-conditions style-warning))
 (defpackage parmesan
    (:use cl alexandria iterate anaphora)
    (:export 
       :parse :pretty-error :call-with-context :return-with-context
-      :defparser :seq :choice :one-of :none-of :many :sep-many :many+ :sep-many+
-      :sep-num :num :par :ret :str :skip :consume-byte :restr :option :between :any-char
-      :sym :letter :digit :hex-digit :octal-digit :whitespace :sep))
+      :defparser :seq :seq* :choice :one-of :none-of :any :any* :many :many* :pass
+      :num :num* :ret :try :except :str :skip :consume-byte :restr :option :between 
+		:any-char :sym :letter :digit :hex-digit :octal-digit :whitespace :sep :newline :spaces))
+
 (in-package parmesan)
 
 (defvar parse-stack nil) ;; (str)
@@ -50,10 +52,10 @@
 (defmacro parse (string exp)
   `(progn (push ,string parse-stack)
           (push 0 match-stack)
-          (let ((res ,exp) (rv (progn (pop parse-stack) (pop match-stack))))
-               ;; (print (list 'return-value (pop match-stack)))
-               (pop match-stack)
-               res)))
+          (let ((res ,exp) 
+					 (rv (progn (pop parse-stack) (pop match-stack))) 
+					 (aux (pop match-stack)))
+               (values res rv))))
 
 (defun bounded-area (str ind range)
    (let ((a (- ind range)) (b (+ ind range)) (len (length str)))
@@ -109,39 +111,43 @@
 (defmacro pass (form)
    `(return-with-context (first ,form) (second ,form)))
 
-;; choice ~ in the matching operation, returns the first form that consumes input
-;; many   ~ matches zero or more of the next form
-;; many+  ~ matches one or more of the next form
-;; one-of ~ matches one character from the given string
-;; skip   ~ consumes input, doesn't return the value
-;; count  ~ parses x occurances of y
-;; option ~ tries x, if it fails, parse y
-;; seq    ~ matches each form sequentially
-;; str    ~ explicitly matches a string
+;; choice  ~ in the matching operation, returns the first form that consumes input
+;; any     ~ matches zero or more of the next form
+;; many    ~ matches one or more of the next form
+;; one-of  ~ matches one character from the given string
+;; none-of ~ matches only if none of the chars in the string match
+;; skip    ~ consumes input, doesn't return the value
+;; num     ~ parses x occurances of y
+;; try     ~ returns a parsing result, no effect on the normal parser stack
+;; except  ~ matches one character from the string if the form does not match
+;; restr   ~ instead of returning the values collected by a parser, return the string
+;; ret     ~ removes the current parsing result and tries to parse x instead
+;; option  ~ tries x, if it fails, parse y
+;; seq     ~ matches each form sequentially
+;; par     ~ re-enter parse mode from normal function
+;; str     ~ explicitly matches a string
+;; sep     ~ seperates by repeated matching. mostly magic
 
-(defmacro seq (form &rest aux)
+(defmacro seq* (form &rest aux)
    (if (first aux)
       (with-gensyms (ind res inner)
          `(let* ((,ind (get-ind)) (,res (call-with-context ,form ,ind)))
             (if (second (second ,res))
-                (let ((,inner (call-with-context (seq ,(car aux) ,@(cdr aux)) (first (second ,res)))))
+                (let ((,inner (call-with-context (seq* ,(car aux) ,@(cdr aux)) (first (second ,res)))))
                    (if (second (second ,inner)) 
                        (return-with-context 
-                           (if (first ,inner)
-                               (if (first ,res)
-                                   (append (list (first ,res)) (first ,inner))
-                                   (first ,inner))
-                               (if (first ,res)
-                                   (list (first ,res))
-                                   nil)) 
+                           (append (list (first ,res)) (first ,inner))
                            (second ,inner))
                        (fail)))
                 (fail))))
       (with-gensyms (str ind res)
          `(let* ((,ind (get-ind)) (,res (call-with-context ,form ,ind)))
             (if (second (second ,res))
-                (return-with-context (if (first ,res) (list (first ,res))) (list (first (second ,res)) t))
+                (return-with-context (aif (first ,res) (list it) '(nil)) (list (first (second ,res)) t))
                 (fail))))))
+
+(defmacro seq (form &rest aux)
+   `(aif (seq* ,form ,@aux) (merge-str it)))
 
 (defmacro choice (form &rest aux)
    (if (first aux)
@@ -156,7 +162,7 @@
        (with-gensyms (str ind res)
          `(let* ((,ind (get-ind)) (,res (call-with-context ,form ,ind)))
             (if (second (second ,res))
-                (return-with-context (if (first ,res) (first ,res)) (list (first (second ,res)) t))
+                (return-with-context (first ,res) (list (first (second ,res)) t))
                 (return-with-context nil (list ,ind nil)))))))
 
 (defmacro one-of (form)
@@ -179,37 +185,37 @@
                    (finally (return (return-with-context (string (aref ,src ,ind)) (list (+ ,ind 1) t)))))
              (return-with-context nil (list ,ind nil))))))
 
-(defmacro many (form)
-  `(aif (sep-many ,form) (merge-str it)))
+(defmacro any (form)
+  `(aif (any* ,form) (merge-str it)))
 
-(defmacro sep-many (form)
+(defmacro any* (form)
    (with-gensyms (src ind v i s acc z)
       `(let ((,ind (get-ind)) (,src (get-str)))
          (iter (with ,z = ,ind)
                (for (,v (,i ,s)) = (call-with-context ,form ,z))
-               (if ,v (collect ,v into ,acc))
+               (if ,s (collect ,v into ,acc))
                (if (not ,s)
                    (leave (return-with-context (if ,acc ,acc) (list ,z t)))
                    (setf ,z ,i))))))
 
-(defmacro many+ (form)
-  `(aif (sep-many+ ,form) (merge-str it)))
+(defmacro many (form)
+  `(aif (many* ,form) (merge-str it)))
 
-(defmacro sep-many+ (form)
+(defmacro many* (form)
    (with-gensyms (src ind v i s acc z c)
       `(let ((,ind (get-ind)) (,src (get-str)))
          (iter (with ,z = ,ind)
                (with ,c = 0)
                (for (,v (,i ,s)) = (call-with-context ,form ,z))
                (incf ,c)
-               (if ,v (collect ,v into ,acc))
+               (if ,s (collect ,v into ,acc))
                (if (not ,s)
                    (if (> ,c 1) 
                        (leave (return-with-context ,acc (list ,z t)))
                        (leave (return-with-context nil (list ,ind nil))))
                    (setf ,z ,i))))))
 
-(defmacro sep-num (n form)
+(defmacro num* (n form)
    (with-gensyms (src ind v i s acc z c)
       `(let ((,ind (get-ind)) (,src (get-str)))
          (iter (with ,z = ,ind)
@@ -224,22 +230,24 @@
                    (leave (return-with-context (if ,acc ,acc) (list ,z t))))))))
 
 (defmacro num (n form)
-   `(aif (sep-num ,n ,form) (merge-str it)))
+   `(aif (num* ,n ,form) (merge-str it)))
 
-(defmacro sep (form sep-by)
-   (with-gensyms (src ind v i s acc z x)
-      `(let ((,ind (get-ind)) (,src (get-str)))
-         (iter (with ,z = ,ind)
-               (with ,acc = nil)
-               (for (,v (,i ,s)) = (call-with-context ,form ,z))
-               (if (not ,s)
-                   (leave (return-with-context (if ,acc ,acc) (list ,z t)))
-                   (progn
-                     (appendf ,acc (list ,v))
-                     (let ((x (call-with-context ,sep-by ,i)))
-                          (if (second (second x))
-                              (setf ,z (first (second x)))
-                              (leave (return-with-context ,acc (list ,i t)))))))))))
+(defmacro sep (sep-by &optional form)
+	(if form
+		(with-gensyms (src ind v i s acc z x)
+			`(let ((,ind (get-ind)) (,src (get-str)))
+					 (iter (with ,z = ,ind)
+							 (with ,acc = nil)
+							 (for (,v (,i ,s)) = (call-with-context ,form ,z))
+							 (if (not ,s)
+								  (leave (return-with-context (if ,acc ,acc) (list ,z t)))
+								  (progn
+								     (appendf ,acc (list ,v))
+										 (let ((x (call-with-context ,sep-by ,i)))
+												 (if (second (second x))
+												 	  (setf ,z (first (second x)))
+											  		  (leave (return-with-context ,acc (list ,i t))))))))))
+		`(sep ,sep-by (any (except ,sep-by)))))
 
 (defmacro par (form)
    (with-gensyms (res)
@@ -248,6 +256,13 @@
              (return-with-context (first ,res) (second ,res))
              (return-with-context nil (list (get-ind) nil))))))
 
+(defmacro except (form)
+   (with-gensyms (res)
+       `(let ((,res (call-with-context ,form (get-ind))))
+         (if (not (second (second ,res)))
+             (par any-char)
+             (fail)))))
+
 (defmacro ret (form)
    (with-gensyms (res ing)
        `(let ((,ing (pop match-stack)) (,res (call-with-context ,form (get-ind))))
@@ -255,12 +270,19 @@
              (return-with-context (first ,res) (second ,res))
              (return-with-context nil (list (get-ind) nil))))))
 
+(defmacro try (form)
+   (with-gensyms (res ing)
+       `(let ((,res (call-with-context ,form (get-ind))))
+         (if (second (second ,res))
+             (first ,res)))))
+
 (defmacro str (form)
    (with-gensyms (str src ind)
        `(let ((,str ,form) (,ind (get-ind)) (,src (get-str)))
          (if (str-match ,src ,str ,ind)
              (return-with-context ,str (list (+ (length ,str) ,ind) t))
              (return-with-context nil (list ,ind nil))))))
+
 
 (defmacro skip (form)
    (with-gensyms (res)
@@ -275,6 +297,9 @@
          (if (< ,ind (length ,str))
              (return-with-context (string (aref ,str ,ind)) (list (+ 1 ,ind) t))
              (return-with-context nil (list ,ind nil))))))
+
+(defmacro pass (form)
+	`(return-with-context ,form (list (get-ind) t)))
 
 (defmacro restr (form)
    (with-gensyms (res ind)
@@ -291,7 +316,9 @@
                (par ,aux)))))
 
 (defmacro between (before form after)
-   `(car (seq (skip ,before) ,form (skip ,after))))
+   `(second (seq* (skip ,before) ,form (skip ,after))))
+
+;; library-defined basic parsers
 
 (defparser any-char (consume-byte))
 (defparser sym (one-of "~!@#$%^&*-_=+<>,./\\"))
@@ -300,3 +327,5 @@
 (defparser hex-digit (one-of "0123456789abcdefABCDEF"))
 (defparser octal-digit (one-of "01234567"))
 (defparser whitespace (one-of (coerce '(#\Space #\Tab #\Newline) 'string)))
+(defparser newline (str (format nil "~%")))
+(defparser spaces (many " "))
