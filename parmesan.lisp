@@ -6,14 +6,14 @@
    (:use cl alexandria iterate anaphora)
    (:export 
       :parse :pretty-error :call-with-context :return-with-context
-      :defparser :seq :seq* :choice :one-of :none-of :any :any* :many :many* :pass
+      :defparser :seq :seq* :choice :one-of :none-of :any :any* :many :many*
       :num :num* :ret :try :except :str :skip :consume-byte :restr :option :between 
 		:any-char :sym :letter :digit :hex-digit :octal-digit :whitespace :sep :newline :spaces))
 
 (in-package parmesan)
 
 (defvar parse-stack nil) ;; (str)
-(defvar match-stack nil) ;; (new-ind success)/test-ind
+(defvar match-stack nil) ;; (new-ind status)/test-ind
 
 (defun get-str ()
    (if parse-stack
@@ -107,9 +107,6 @@
 
 (defmacro fail ()
    `(return-with-context nil (list (get-ind) nil)))
-
-(defmacro pass (form)
-   `(return-with-context (first ,form) (second ,form)))
 
 ;; choice  ~ in the matching operation, returns the first form that consumes input
 ;; any     ~ matches zero or more of the next form
@@ -288,7 +285,7 @@
    (with-gensyms (res)
      `(let ((,res (call-with-context ,form (get-ind))))
            (if (second (second ,res))
-               (return-with-context nil (second ,res))
+               (return-with-context nil (list (first (second ,res)) :ignore))
                (return-with-context nil (list (get-ind) nil))))))
 
 (defmacro consume-byte ()
@@ -321,7 +318,7 @@
 ;; library-defined basic parsers
 
 (defparser any-char (consume-byte))
-(defparser sym (one-of "~!@#$%^&*-_=+<>,./\\"))
+(defparser sym (one-of "~!@#$?%^&*-_=+<>,./\\"))
 (defparser letter (one-of "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"))
 (defparser digit (one-of "0123456789"))
 (defparser hex-digit (one-of "0123456789abcdefABCDEF"))
