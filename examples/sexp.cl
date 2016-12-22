@@ -1,11 +1,34 @@
-(ql:quickload '(parmesan anaphora))
-(use-package '(parmesan anaphora))
+(ql:quickload '(parmesan))
+(use-package '(parmesan))
 
-(defmacro trim (form) `(between (any whitespace) ,form (any whitespace)))
-(defparser parse-sym (aif (seq (choice sym letter) (any (choice sym letter digit))) (intern (string-upcase it))))
-(defparser parse-int (aif (many digit) (parse-integer it)))
-(defparser str-term  (if (try "\\\"") (progn (str "\\\"") "\"") (except "\"")))
-(defparser quoted    (between "\"" (any str-term) "\""))
-(defparser empty     (if (str "()") nil))
-(defparser term      (trim (choice quoted parse-sym parse-int empty sexp)))
-(defparser sexp      (trim (between "(" (any* term) ")")))
+(defparser ignore-whitespace (form) 
+	(between (any whitespace) (any whitespace) form))
+
+(defparser symbol-char () 
+	(one-of "~!@#$?%^&*-_=+<>,./\\"))
+
+;; according to the standard, symbols must start with either a letter or normal symbol characer, 
+;; and then any number of letters, symbol characters, or numbers
+(defparser symbol ()
+	(seq (first-char <- (choice symbol-char letter))
+		  (other-char <- (any (choice symbol-char letter digit)))
+		  (intern (string-upcase (cats first-char other-char)))))
+
+(defparser int ()
+	(seq (n <- many digit)
+		  (parse-integer n)))
+
+(defparser list ()
+	(ignore-whitespace (between "(" ")" (any expression))))
+
+(defparser quote ()
+	(seq #\'
+		  (exp <- expression)
+		 `(quote ,exp)))
+
+(defparser expresssion
+	(ignore-whitespace (choice quoted-string symbol int list quote)))
+
+;; usage
+(parse-from-stream *standard-input* expression)
+(parse string expression)

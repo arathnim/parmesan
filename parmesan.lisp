@@ -72,7 +72,7 @@
 ;; str     ~ explicitly matches a string
 ;; sep     ~ seperates by repeated matching. mostly magic
 
-(defun pchar (c)
+(defun chr (c)
    (declare (type character c))
    (if (test-remaining 1) 
        (if (eql (char *str* *ind*) c)
