@@ -4,11 +4,11 @@
 Parmesan is a little parser combinator library, based primarily on Parsec, with a few changes to make it more lispy.
 It differs from Parsec and other CL parser combinator libraries by being focused on simplicity and providing elegant, intuitive parsers.
 
-Other CL parser combinator libraries prefix the parsers with "=" or ".", but Parmesan uses a separate namespace for parsers,
-so they have the natural function names. Parsers are treated as both functions and variables, 
-so you don't need parens around parsers with no arguments.
+Other CL parser combinator libraries prefix the parsers with `=` or `.`, but Parmesan uses single-word parser names like `choice` and `many`.  
+Parsers are treated as both functions and variables, so you don't need parens around parsers with no arguments.
 
 `seq` and `defparser` use a syntax similar to haskell do-notation, using a left-arrow for binding and extracting parser results.
+character and string parsers can be invoked just by using literal chars and strings.
 
 For example, this line of Haskell from [Write Yourself a Scheme](https://en.wikibooks.org/wiki/Write_Yourself_a_Scheme_in_48_Hours), 
 which parses a simple string without escapes:
@@ -51,14 +51,14 @@ So the form `(choice "foo" "bar")` parses either the string "foo" or the string 
 
 `many` parses one or more of the same form
 
-```
+```cl
 (parse "aaabbb" (many "a")) => "aaa"
 (parse "bbb" (many "a")) => nil
 ```
     
 `seq` matches each form sequentially, and returns a list of the matched forms
 
-```    
+```cl  
 (defparser seq-test () (seq "a" (choice "a" "b") (many "c")))
 (parse "abccc" (seq-test)) => ("a" "b" "ccc")
 ```
