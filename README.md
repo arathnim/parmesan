@@ -1,46 +1,69 @@
 # Parmesan
-## parser combinator macros for Common Lisp
+## parser combinators for Common Lisp
 
-This is a little parser combinator library, with a few changes to make it more lispy. 
-It differs from Parsec and [parseltounge](https://github.com/VincentToups/parseltongue) 
-by being based on return values, opposed to binding the values sequentially.
+Parmesan is a little parser combinator library, based primarily on Parsec, with a few changes to make it more lispy.
+It differs from Parsec and other CL parser combinator libraries by being focused on simplicity and providing elegant, intuitive parsers.
 
-For example, this line of Haskell from [Write Yourself a Scheme](https://en.wikibooks.org/wiki/Write_Yourself_a_Scheme_in_48_Hours)
+Other CL parser combinator libraries prefix the parsers with "=" or ".", but Parmesan uses a separate namespace for parsers,
+so they have the natural function names. Parsers are treated as both functions and variables, 
+so you don't need parens around parsers with no arguments.
 
-    parseString = do
-                  char '"'
-                  x <- many (noneOf "\"")
-                  char '"'
-                  return $ String x
+`seq` and `defparser` use a syntax similar to haskell do-notation, using a left-arrow for binding and extracting parser results.
+
+For example, this line of Haskell from [Write Yourself a Scheme](https://en.wikibooks.org/wiki/Write_Yourself_a_Scheme_in_48_Hours), 
+which parses a simple string without escapes:
+
+```Haskell
+parseString = do
+              char '"'
+              x <- many (noneOf "\"")
+              char '"'
+              return $ String x
+```
                   
-Would be written in parmesan as
+could be written in parmesan as:
 
-    (defparser parse-string 
-      (between "\"" (many (none-of "\"")) "\""))
-      
+```cl
+(defparser parse-string ()
+  #\" 
+  (s <- (any (none-of #\"))) 
+  #\"
+  s)
+```
+
 ## A couple parsers
 
-`choice` takes a list of forms, and returns the first one that succeeds
+`choice` takes any number of forms, and returns the first one that succeeds.
+So the form `(choice "foo" "bar")` parses either the string "foo" or the string "bar".
 
-    (parse "a" (choice "a" "b")) => "a"
-    (parse "b" (choice "a" "b")) => "b"
-    (parse "c" (choice "a" "b")) => nil
-    
-`many` parses zero or more of the same form, same as in parsec
+```cl
+(parse "foo" (choice "foo" "bar")) => "foo"
+(parse "bar" (choice "foo" "bar")) => "bar"
+(parse "baz" (choice "foo" "bar"))
+ => error: expected either "foo" or "bar" at position 0
+```
 
-    (parse "aaabbb" (many "a")) => "aaa"
+`any` parses zero or more of the same form, similar to `*` in regular expressions.
 
-`many+` parses one or more of the same form
+```cl
+(parse "aaabbb" (any "a")) => "aaa"
+```
 
-    (parse "aaabbb" (many+ "a")) => "aaa"
-    (parse "bbb" (many+ "a")) => nil
+`many` parses one or more of the same form
+
+```
+(parse "aaabbb" (many "a")) => "aaa"
+(parse "bbb" (many "a")) => nil
+```
     
 `seq` matches each form sequentially, and returns a list of the matched forms
-    
-    (defparser seq-test (seq "a" (choice "a" "b") (many "c")))
-    (parse "abccc" (seq-test)) => ("a" "b" "ccc")
-    
-see sexp.cl for some more involved examples.
+
+```    
+(defparser seq-test () (seq "a" (choice "a" "b") (many "c")))
+(parse "abccc" (seq-test)) => ("a" "b" "ccc")
+```
+ 
+See sexp.cl for some more involved examples.
 
 ## dependencies and installation
 
@@ -52,4 +75,5 @@ To use parmesan, clone the repo into `~/quicklisp/local-projects`, and run `(ql:
 
 ## Thanks
 
-Thanks to [kori](https://github.com/kori), who came up with the fun name for this project.
+Thanks to [kori](https://github.com/kori), who came up with the fun name for this project, and
+the developers who worked on Parsec, as well as the authors of other lisp parser combinator libraries.

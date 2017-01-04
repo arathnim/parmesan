@@ -1,61 +1,94 @@
 ;; author *this* => ("Dylan Ball" "Arathnim@gmail.com")
 
-(proclaim '(optimize (speed 3) (safety 0) (debug 0) (space 0)))
+(proclaim '(optimize (speed 0) (safety 3) (debug 3) (space 0)))
 (declaim #+sbcl(sb-ext:muffle-conditions style-warning))
+(ql:quickload '(alexandria iterate anaphora) :silent t)
 (defpackage parmesan
    (:use cl alexandria iterate anaphora))
 
 (in-package parmesan)
 
-(defvar *str* nil)
-(defvar *ind* 0)
+(defvar *source* nil)
+(defvar *index* 0)
 
-(defstruct (parser-result (:conc-name result-))
-   value (index 0 :type fixnum) status)
+(defstruct (source)
+   value
+   (cached-string "")
+   (max-index -1))
 
-(defun cat (list)
+(defun get-character (n)
+   (if (stringp (source-value *source*))
+       (char (source-value *source*) n)
+       (if (> n (source-max-index *source*))
+           (iter (until (eql (source-max-index *source*) n))
+                 (append-character (read-char (source-value *source*)))
+                 (finally (return (char (source-cached-string *source*) n))))
+           (char (source-cached-string *source*) n))))
+
+(defun append-character (c)
+   (setf (source-cached-string *source*)
+         (concatenate 'string
+            (source-cached-string *source*)
+            (string c)))
+   (incf (source-max-index *source*)))
+
+(declaim (inline error?))
+(defstruct (parser-error (:conc-name error-) (:predicate error?))
+   type index args)
+
+(defun kitten (&rest list)
    (format nil "~{~a~}" list))
 
-(defmacro cat* (&rest rest)
-  `(cat (list ,@rest)))
-
-(defun merge-chars (seq)
-   (coerce seq 'string))
-
-(defun merge-str (seq)
-   (if (every #'stringp seq)
-       (cat seq)
-       seq))
-
-(declaim (inline fail))
-(defun fail (expected actual &optional (index *ind*))
-   (make-parser-result :value (list expected actual) :index index :status nil))
+(defun cat (&rest list)
+   (format nil "~{~a~}" 
+      (remove-if-not (lambda (x) x) list)))
 
 (declaim (inline pass))
-(defun pass (form n)
-   (declare (type fixnum n))
-   (make-parser-result :value form :index (+ *ind* n) :status t))
+(defun pass (value n)
+   (incf *index* n)
+   value)
+
+(declaim (inline fail))
+(defun fail (type args &optional (index *index*))
+   (make-parser-error :type type :args args :index index))
+
+(defmacro on-success (exp &rest body)
+   (with-gensyms (r)
+      `(let ((,r ,exp)) 
+         (if (error? ,r)
+             ,r
+             (progn ,@body)))))
+
+(defmacro on-failure (exp &rest body)
+   (with-gensyms (r)
+      `(let ((,r ,exp)) 
+         (if (error? ,r)
+             (progn ,@body)
+             ,r))))
 
 (defun desugar (exp)
    (cond ((stringp exp) `(str ,exp))
          ((symbolp exp) `(,exp))
          ((numberp exp) `(str ,(string (code-char exp))))
-         ((characterp exp) `(string ,exp))
+         ((characterp exp) `(chr ,exp))
          (t exp)))
 
 (defun handle-result (r)
-   (if (not (result-status r))
-       (error "parsing error at position ~a, expected \"~a\", but found \"~a\""
-         (result-index r) (first (result-value r)) (second (result-value r)))
-       (result-value r)))
+   (on-failure r
+       (error "parsing error at position ~a, error ~s"
+         (error-index r)
+         (list (error-type r) (error-args r)))))
 
-(defmacro parse (str form)
-   `(let ((*str* ,str)
-          (*ind* 0))
-          (handle-result ,form)))
+(defmacro parse (src form)
+   `(let ((*source* (make-source :value ,src))
+          (*index* 0))
+          (handle-result (funcall ,form))))
 
-(defmacro test-remaining (n)
-   `(>= (length *str*) (+ *ind* ,n)))
+;; (declaim (inline test-remaining))
+(defun test-remaining (n)
+   (if (stringp (source-value *source*))
+       (>= (length (source-value *source*)) (+ *index* n))
+       t))
 
 ;; choice  ~ in the matching operation, returns the first form that consumes input
 ;; any     ~ matches zero or more of the next form
@@ -66,7 +99,7 @@
 ;; try     ~ returns a parsing result, no effect on the normal parser stack
 ;; except  ~ matches one character from the string if the form does not match
 ;; ret     ~ removes the current parsing result and tries to parse x instead
-;; option  ~ tries x, if it fails, parse y
+;; optional~ tries x, if it fails, parse y
 ;; seq     ~ matches each form sequentially, returns a list of forms or nil
 ;; par     ~ re-enter parse mode from normal function, internal use only!
 ;; str     ~ explicitly matches a string
@@ -74,39 +107,40 @@
 
 (defun chr (c)
    (declare (type character c))
-   (if (test-remaining 1) 
-       (if (eql (char *str* *ind*) c)
-           (pass c 1)
-           (fail (string c) (char *str* *ind*)))
-       (fail (string c) nil)))
+   (lambda ()
+      (if (test-remaining 1) 
+          (if (eql (get-character *index*) c)
+              (pass c 1)
+              (fail (string c) nil))
+          (fail (string c) nil))))
 
 (defun str (s)
    (declare (type string s))
-   (iter (for i from 0 below (length s))
-         (for x = (if (test-remaining (+ 1 i)) 
-                      (char *str* (+ i *ind*)) 
-                      (leave (fail (string (char s i)) nil (+ *ind* i)))))
-         (for y = (char s i))
-         (if (not (eql x y))
-             (leave (fail (string y) x (+ *ind* i))))
-         (finally (return (pass s (length s))))))
+   (lambda () 
+      (iter (for c in-string s)
+            (for r = (funcall (chr c)))
+            (on-failure r (leave r))
+            (finally (return s)))))
 
 (defun one-of (s)
-   (if (test-remaining 1)
-       (iter (for x in-string s)
-             (when (eql x (char *str* *ind*))
-                   (leave (pass x 1)))
-             (finally (return (fail s (char *str* *ind*)))))
-       (fail s nil)))
+   (lambda () 
+      (iter (for c in-string s)
+            (on-success (funcall (try (chr c)))
+               (leave (funcall (chr c))))
+            (finally (return (fail s nil))))))
 
 ;; TODO find a way to make errors accept negated logic
 (defun none-of (s)
-   (if (test-remaining 1) 
-       (iter (for x in-string s)
-             (when (eql x (char *str* *ind*))
-                   (leave (fail s (char *str* *ind*))))
-             (finally (return (pass (char *str* *ind*) 1))))
-       (fail s nil)))
+   (lambda () 
+      (iter (for c in-string s)
+            (on-success (funcall (try (chr c)))
+               (leave (fail s nil)))
+            (finally (return c)))))
+
+(defun try (p)
+   (lambda () 
+      (let ((*index* *index*))
+        (funcall p))))
 
 ;; (defmacro many (form)
 ;;    (with-gensyms (res count acc) 

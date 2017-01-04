@@ -1,0 +1,40 @@
+Parsers
+
+   chr c
+   str s
+   item
+   items n
+   one-of string
+   none-of string
+   range a b
+
+   any parser
+   many parser
+   choice (rest parsers)
+   try parser
+   times n parser
+   optional parser
+   sep parser delimiter
+
+   regex str
+   regex-strip str
+   regex-list str
+
+Macros
+
+   seq (rest forms) 
+      applies parsers in order, also allows bindings in the form of left arrow
+
+Functions
+
+   defparser name args (rest body)
+   parse string parser
+   parse-from-stream stream parser
+   
+   cat (rest list)
+   kitten (rest list)
+
+Scratch
+
+   (defparser digit () (range "0" "9"))
+   (defparser hex-digit () (choice digit (range "A" "F") (range "a" "f")))
