@@ -2,9 +2,9 @@
 
 (proclaim '(optimize (speed 0) (safety 3) (debug 3) (space 0)))
 (declaim #+sbcl(sb-ext:muffle-conditions style-warning))
-(ql:quickload '(alexandria iterate anaphora) :silent t)
+(ql:quickload '(alexandria iterate anaphora destructuring-match) :silent t)
 (defpackage parmesan
-   (:use cl alexandria iterate anaphora))
+   (:use cl alexandria iterate anaphora destructuring-match))
 
 (in-package parmesan)
 
@@ -66,12 +66,12 @@
              (progn ,@body)
              ,r))))
 
-(defun desugar (exp)
-   (cond ((stringp exp) `(str ,exp))
-         ((symbolp exp) `(,exp))
-         ((numberp exp) `(str ,(string (code-char exp))))
-         ((characterp exp) `(chr ,exp))
-         (t exp)))
+(defun run (exp)
+   (funcall
+      (cond ((stringp exp) (str exp))
+            ((characterp exp) (chr exp))
+            ((numberp exp) (chr (code-char exp)))
+            (t exp))))
 
 (defun handle-result (r)
    (on-failure r
@@ -82,102 +82,94 @@
 (defmacro parse (src form)
    `(let ((*source* (make-source :value ,src))
           (*index* 0))
-          (handle-result (funcall ,form))))
+          (handle-result (run ,form))))
 
-;; (declaim (inline test-remaining))
+(declaim (inline test-remaining))
 (defun test-remaining (n)
    (if (stringp (source-value *source*))
        (>= (length (source-value *source*)) (+ *index* n))
        t))
 
-;; choice  ~ in the matching operation, returns the first form that consumes input
-;; any     ~ matches zero or more of the next form
-;; many    ~ matches one or more of the next form
-;; one-of  ~ matches one character from the given string
-;; none-of ~ matches only if none of the chars in the string match
-;; times   ~ parses x occurances of y
-;; try     ~ returns a parsing result, no effect on the normal parser stack
-;; except  ~ matches one character from the string if the form does not match
-;; ret     ~ removes the current parsing result and tries to parse x instead
-;; optional~ tries x, if it fails, parse y
-;; seq     ~ matches each form sequentially, returns a list of forms or nil
-;; par     ~ re-enter parse mode from normal function, internal use only!
-;; str     ~ explicitly matches a string
-;; sep     ~ seperates by repeated matching. mostly magic
+(defvar free-vars nil)
+(defun handle-forms (forms)
+   (let* ((free-vars nil)
+          (new-forms (transform-binds forms)))
+          (list free-vars new-forms)))
 
-(defun chr (c)
-   (declare (type character c))
+(defun transform-binds (forms)
+   (iter (for exp in forms)
+         (collect 
+            (bind :on-failure exp
+                  ((multiple lhs) '<- rhs) exp
+                  (appendf free-vars lhs)
+                  (if (not (cdr lhs))
+                     `(lambda () (setf ,@lhs (run ,rhs)) ,@lhs)
+                     `(lambda () ,lhs ,rhs))))))
+
+(defun simple-pair (list val)
+   (mapcar (lambda (x) (list x val)) list))
+
+(defmacro defparser* (name args &body body)
+   `(progn (defun ,name ,args (lambda () ,@body))
+          ,(when (not args) 
+                `(progn 
+                  (defvar ,name (funcall #',name))
+                  (setf ,name (funcall #',name))))))
+
+(defun seq* (&rest functions)
    (lambda ()
-      (if (test-remaining 1) 
-          (if (eql (get-character *index*) c)
-              (pass c 1)
-              (fail (string c) nil))
-          (fail (string c) nil))))
+      (iter (for f in functions)
+            (for r = (run f))
+            (collect (on-failure r (leave r))))))
 
-(defun str (s)
-   (declare (type string s))
-   (lambda () 
-      (iter (for c in-string s)
-            (for r = (funcall (chr c)))
-            (on-failure r (leave r))
-            (finally (return s)))))
+;; this is hard to implement
+(defmacro seq (&rest forms)
+   (let ((r (handle-forms forms)))
+      `(seq nil)))
 
-(defun one-of (s)
-   (lambda () 
-      (iter (for c in-string s)
-            (on-success (funcall (try (chr c)))
-               (leave (funcall (chr c))))
-            (finally (return (fail s nil))))))
+;; choice   ~ in the matching operation, returns the first form that consumes input
+;; any      ~ matches zero or more of the next form
+;; many     ~ matches one or more of the next form
+;; one-of   ~ matches one character from the given string
+;; none-of  ~ matches only if none of the chars in the string match
+;; times    ~ parses x occurances of y
+;; try      ~ returns a parsing result, no effect on the normal parser stack
+;; optional ~ tries x, if it fails, parse y
+;; seq      ~ matches each form sequentially, returns a list of forms or nil
+;; str      ~ explicitly matches a string
+;; sep      ~ seperates by repeated matching. mostly magic
+
+(defparser* chr (c)
+   (if (test-remaining 1) 
+       (if (eql (get-character *index*) c)
+           (pass c 1)
+           (fail (string c) nil))
+       (fail (string c) nil)))
+
+(defparser* str (s)
+   (iter (for c in-string s)
+         (for r = (funcall (chr c)))
+         (on-failure r (leave r))
+         (finally (return s))))
+
+(defparser* one-of (s)
+   (iter (for c in-string s)
+         (on-success (funcall (try (chr c)))
+            (leave (funcall (chr c))))
+         (finally (return (fail s nil)))))
 
 ;; TODO find a way to make errors accept negated logic
-(defun none-of (s)
-   (lambda () 
-      (iter (for c in-string s)
-            (on-success (funcall (try (chr c)))
-               (leave (fail s nil)))
-            (finally (return c)))))
+(defparser* none-of (s)
+   (iter (for c in-string s)
+         (on-success (funcall (try (chr c)))
+            (leave (fail s nil)))
+         (finally (return c))))
 
-(defun try (p)
-   (lambda () 
-      (let ((*index* *index*))
-        (funcall p))))
+(defparser* try (p)
+   (let ((*index* *index*))
+     (run p)))
 
-;; (defmacro many (form)
-;;    (with-gensyms (res count acc) 
-;;       `(let ((*ind* *ind*))
-;;          (iter (for ,res = ,(desugar form))
-;;                (for ,count upfrom 0)
-;;                (setf *ind* (second ,res))
-;;                (when (not (third ,res))
-;;                      (if (> ,count 0)
-;;                          (leave (list (if (every #'characterp ,acc) (merge-chars ,acc) ,acc) (second ,res) t))
-;;                          (fail)))
-;;                (collect (first ,res) into ,acc)))))
-
-;; (defmacro any (form)
-;;    (with-gensyms (res count acc) 
-;;       `(let ((*ind* *ind*))
-;;          (iter (for ,res = ,(desugar form))
-;;                (for ,count upfrom 0)
-;;                (setf *ind* (second ,res))
-;;                (when (not (third ,res))
-;;                      (leave (list (if (every #'characterp ,acc) (merge-chars ,acc) ,acc) (second ,res) t)))
-;;                (collect (first ,res) into ,acc)))))
-
-;; (defmacro seq (&rest forms)
-;;    (if (not (eql 1 (length forms)))
-;;        (with-gensyms (res inner)
-;;          `(let ((,res ,(desugar (car forms))))
-;;             (if (third ,res)
-;;                 (let* ((*ind* (second ,res)) (,inner (seq ,@(cdr forms))))
-;;                    (if (third ,inner) 
-;;                        (list (cons (first ,res) (first ,inner)) 
-;;                              (second ,inner)
-;;                              t)
-;;                        (fail)))
-;;                 (fail))))
-;;       (with-gensyms (str res)
-;;          `(let ((,res ,(desugar (car forms))))
-;;             (if (third ,res)
-;;                 (list (cons (first ,res) nil) (second ,res) t)
-;;                 (fail))))))
+(defparser* any (p)
+   (iter (for r = (run p))
+         (until (error? r))
+         (collect r)))
