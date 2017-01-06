@@ -98,6 +98,22 @@
               (list free-vars (butlast new-forms) (car (last new-forms)))
               (list new-forms))))
 
+(defun generate-single-binding (var form)
+  `(lambda () (setf ,var ,form) ,var))
+
+(defun generate-multiple-binding (vars form)
+   (with-gensyms (parse-result)
+     `(lambda ()
+        (let ((,parse-result (run ,form))) 
+          (if (listp ,parse-result) 
+              (progn
+                (when (not (eql (length ,parse-result) ,(length vars)))
+                      (error "result of ~a is the wrong length for the variable list ~a" ',form '(,@vars)))
+                ,@(iter (for x in vars)
+                        (for y upfrom 0) 
+                        (collect `(setf ,x (nth ,y ,parse-result)))))
+              ,parse-result)))))
+
 (defun transform-binds (forms)
    (iter (for exp in forms)
          (collect 
@@ -105,18 +121,8 @@
                ((multiple lhs) '<- rhs) exp
                (appendf free-vars lhs)
                (if (not (cdr lhs))
-                  `(lambda () (setf ,@lhs (run ,rhs)) ,@lhs)
-                   (with-gensyms (foo)
-                     `(lambda ()
-                        (let ((,foo (run ,rhs))) 
-                              (if (listp ,foo) 
-                                  (progn 
-                                    (when (not (eql (length ,foo) ,(length lhs)))
-                                          (error "result of ~a is the wrong length for the variable list ~a" ',rhs '(,@lhs)))
-                                    ,@(iter (for x in lhs)
-                                            (for y upfrom 0) 
-                                            (collect `(setf ,x (nth ,y ,foo)))))
-                                  ,foo)))))))))
+                   (generate-single-binding (car lhs) rhs)
+                   (generate-multiple-binding lhs rhs))))))
 
 (defun simple-pair (list val)
    (mapcar (lambda (x) (list x val)) list))
