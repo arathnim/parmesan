@@ -67,11 +67,11 @@
              ,r))))
 
 (defun run (exp)
-   (funcall
-      (cond ((stringp exp) (str exp))
-            ((characterp exp) (chr exp))
-            ((numberp exp) (chr (code-char exp)))
-            (t exp))))
+   (cond ((stringp exp) (funcall (str exp)))
+         ((characterp exp) (funcall (chr exp)))
+         ((numberp exp) (funcall (chr (code-char exp))))
+         ((functionp exp) (funcall exp))
+         (t (error "expected a parser, but found ~s instead" exp))))
 
 (defun handle-result (r)
    (on-failure r
@@ -94,17 +94,29 @@
 (defun handle-forms (forms)
    (let* ((free-vars nil)
           (new-forms (transform-binds forms)))
-          (list free-vars new-forms)))
+          (if free-vars 
+              (list free-vars (butlast new-forms) (car (last new-forms)))
+              (list new-forms))))
 
 (defun transform-binds (forms)
    (iter (for exp in forms)
          (collect 
             (bind :on-failure exp
-                  ((multiple lhs) '<- rhs) exp
-                  (appendf free-vars lhs)
-                  (if (not (cdr lhs))
-                     `(lambda () (setf ,@lhs (run ,rhs)) ,@lhs)
-                     `(lambda () ,lhs ,rhs))))))
+               ((multiple lhs) '<- rhs) exp
+               (appendf free-vars lhs)
+               (if (not (cdr lhs))
+                  `(lambda () (setf ,@lhs (run ,rhs)) ,@lhs)
+                   (with-gensyms (foo)
+                     `(lambda ()
+                        (let ((,foo (run ,rhs))) 
+                              (if (listp ,foo) 
+                                  (progn 
+                                    (when (not (eql (length ,foo) ,(length lhs)))
+                                          (error "result of ~a is the wrong length for the variable list ~a" ',rhs '(,@lhs)))
+                                    ,@(iter (for x in lhs)
+                                            (for y upfrom 0) 
+                                            (collect `(setf ,x (nth ,y ,foo)))))
+                                  ,foo)))))))))
 
 (defun simple-pair (list val)
    (mapcar (lambda (x) (list x val)) list))
@@ -122,10 +134,30 @@
             (for r = (run f))
             (collect (on-failure r (leave r))))))
 
-;; this is hard to implement
 (defmacro seq (&rest forms)
    (let ((r (handle-forms forms)))
-      `(seq nil)))
+      (if (eql (length r) 1) 
+          (with-gensyms (a x y) 
+           `(lambda ()
+              (let ((,a (list ,@(first r)))) 
+                (iter (for ,x in ,a)
+                      (for ,y = (run ,x))
+                      (on-failure ,y (leave ,y))
+                      (finally (return ,y))))))
+          (with-gensyms (a x y)
+           `(lambda ()
+              (let* ,(append (simple-pair (first r) nil) `((,a (list ,@(second r)))))
+                (iter (for ,x in ,a)
+                      (for ,y = (run ,x))
+                      (on-failure ,y (leave ,y))
+                      (finally (return ,(third r))))))))))
+
+(defmacro defparser (name args &body body)
+   `(progn (defun ,name ,args (seq ,@body))
+          ,(when (not args) 
+                `(progn 
+                  (defvar ,name (funcall #',name))
+                  (setf ,name (funcall #',name))))))
 
 ;; choice   ~ in the matching operation, returns the first form that consumes input
 ;; any      ~ matches zero or more of the next form
