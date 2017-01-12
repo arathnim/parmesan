@@ -87,9 +87,15 @@
 
 (defun handle-result (r)
    (on-failure r
-       (error "parsing error at position ~a, error ~s"
-         (error-index r)
-         (list (error-type r) (error-args r)))))
+       (error (format-error r))))
+
+(defun format-error (e)
+	(case (error-type e)
+		(expected 
+			(format nil "expected ~a, but found ~a at position ~a"
+			   (first (error-args e)) (second (error-args e)) (error-index e)))
+		(custom (car (error-args e)))
+		(otherwise (format nil "untyped error: ~a" e))))
 
 (defmacro parse (src form)
    `(let ((*source* (make-source :value ,src))
@@ -184,7 +190,7 @@
 ;; none-of  ~ matches only if none of the chars in the string match
 ;; times    ~ parses x occurances of y
 ;; try      ~ returns a parsing result, no effect on the normal parser stack
-;; optional ~ tries x, if it fails, parse y
+;; optional ~ tries x, parses it on success, succeeds either way
 ;; seq      ~ matches each form sequentially, returns a list of forms or nil
 ;; str      ~ explicitly matches a string
 ;; sep      ~ seperates by repeated matching. mostly magic
@@ -193,7 +199,7 @@
    (if (test-remaining 1) 
        (if (eql (get-character *index*) char)
            (pass char 1)
-           (fail (string char) nil))
+           (fail 'expected (list (string char) (get-character *index*))))
        (fail (string char) nil)))
 
 (defparser* str (string)
