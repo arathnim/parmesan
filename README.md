@@ -10,7 +10,7 @@ Parsers are treated as both functions and variables, so you don't need parens ar
 `seq` and `defparser` use a syntax similar to haskell do-notation, using a left-arrow for binding and extracting parser results.
 character and string parsers can be invoked just by using literal chars and strings.
 
-For example, this line of Haskell from [Write Yourself a Scheme](https://en.wikibooks.org/wiki/Write_Yourself_a_Scheme_in_48_Hours), 
+For example, this line of Haskell from [Write Yourself a Scheme](https://en.wikibooks.org/wiki/Write_Yourself_a_Scheme_in_48_Hours),
 which parses a simple string without escapes:
 
 ```Haskell
@@ -20,13 +20,13 @@ parseString = do
               char '"'
               return $ String x
 ```
-                  
+
 could be written in parmesan as:
 
 ```cl
 (defparser parse-string ()
-  #\" 
-  (s <- (any (none-of #\"))) 
+  #\"
+  (s <- (any (none-of #\")))
   #\"
   s)
 ```
@@ -55,14 +55,14 @@ So the form `(choice "foo" "bar")` parses either the string "foo" or the string 
 (parse "aaabbb" (many "a")) => "aaa"
 (parse "bbb" (many "a")) => nil
 ```
-    
+
 `seq` matches each form sequentially, and returns a list of the matched forms
 
 ```cl  
 (defparser seq-test () (seq "a" (choice "a" "b") (many "c")))
 (parse "abccc" (seq-test)) => ("a" "b" "ccc")
 ```
- 
+
 See sexp.cl for some more involved examples.
 
 ## dependencies and installation
