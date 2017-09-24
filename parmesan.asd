@@ -5,5 +5,5 @@
 	:maintainer "Dylan Ball <arathnim@gmail.com>"
 	:description "Parmesan"
 	:long-description "parser combinators, lisp-style"
-	:depends-on (alexandria iterate anaphora destructuring-match)
+	:depends-on (alexandria iterate wernicke)
 	:components ((:file "parmesan")))
